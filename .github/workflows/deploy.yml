@@ -1,8 +1,8 @@
 name: deploy
 
-# Reusable deploy for Plexus apps. Mounts the stateless deploy verb
-# (plexus-ms/library scripts/deploy.sh) on the push event; the tenant supplies the
-# host + SSH key. Apps reference it after ci:
+# Reusable deploy for Plexus apps. Thin wrapper that mounts the stateless deploy
+# verb (scripts/deploy.sh in this repo) on the push event; the tenant supplies
+# the host + SSH key. Apps reference it after ci:
 #
 #   deploy:
 #     needs: ci
@@ -47,6 +47,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          repository: plexus-ms/ci
+          ref: ${{ github.job_workflow_sha }}
       - name: Load SSH key
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
