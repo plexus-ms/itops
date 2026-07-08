@@ -1,6 +1,6 @@
 name: deploy
 
-# Reusable deploy for Plexus apps (PLEXUS.md §5). Mounts the stateless deploy verb
+# Reusable deploy for Plexus apps. Mounts the stateless deploy verb
 # (plexus-ms/library scripts/deploy.sh) on the push event; the tenant supplies the
 # host + SSH key. Apps reference it after ci:
 #
