@@ -1,10 +1,8 @@
 name: plexus-ci
 
-# Reusable CI for Plexus apps: the contract verbs (check → test → build), then
-# package the prebuilt artifact into a runtime image and push it to the
-# caller's GHCR namespace, tagged with the git SHA. CI speaks only the verbs;
-# what runs behind them is the repo's business, and the image build compiles
-# nothing — the app's Dockerfile is runtime-only packaging (§ 5 PLX).
+# Reusable CI for Plexus apps.
+# - Runs the contract verbs (check → test) for verification.
+# - If `build` is `true`, builds and pushes a Docker image to GHCR.
 
 on:
   workflow_call:
@@ -31,35 +29,31 @@ on:
     outputs:
       image-ref:
         description: Full image ref that was built (name:sha).
-        value: ${{ jobs.ci.outputs.image-ref }}
+        value: ${{ jobs.build.outputs.image-ref }}
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  ci:
+  verify:
     runs-on: ubuntu-latest
-    outputs:
-      image-ref: ${{ steps.meta.outputs.image-ref }}
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v4
       - run: mise :check
       - run: mise :test
 
-      # Everything below runs only when an image is wanted (environment-branch
-      # pushes) — PRs stop after the verbs.
-      - if: ${{ inputs.build }}
-        run: mise :build ${{ inputs.app }}
-      # NODE_VERSION (the runtime base image tag) is read the way every other
-      # consumer reads it — from mise's env.
-      - if: ${{ inputs.build }}
-        run: |
-          eval "$(mise env -s bash)"
-          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
-      - if: ${{ inputs.build }}
-        id: meta
+  build:
+    needs: verify
+    if: ${{ inputs.build }}
+    runs-on: ubuntu-latest
+    outputs:
+      image-ref: ${{ steps.meta.outputs.image-ref }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: echo "NODE_VERSION=$(cat .node-version)" >> "$GITHUB_ENV"
+      - id: meta
         # Image lives under the CALLER's org so the repo's own GITHUB_TOKEN can
         # push it (no cross-org PAT). Tenant app → tenant-org registry.
         run: |
@@ -67,16 +61,13 @@ jobs:
           [ -n "$name" ] || name='${{ inputs.app }}'
           owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
           echo "image-ref=ghcr.io/$owner/$name:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-      - if: ${{ inputs.build }}
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - if: ${{ inputs.build }}
-        uses: docker/setup-buildx-action@v3
-      - if: ${{ inputs.build }}
-        uses: docker/build-push-action@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ inputs.dockerfile != '' && inputs.dockerfile || format('apps/{0}/Dockerfile', inputs.app) }}
@@ -85,3 +76,5 @@ jobs:
           build-args: |
             APP=${{ inputs.app }}
             NODE_VERSION=${{ env.NODE_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
