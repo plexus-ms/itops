@@ -2,10 +2,15 @@
 #
 # Plexus deploy verb — § 7 PLX. A stateless procedure, not a system:
 #
-#   ssh → docker compose pull → mise migrate → docker compose up -d
+#   ssh → docker compose pull → compose run --rm migrate (if declared) → docker compose up -d
 #       → poll /healthz → on failure: re-up the previous image, exit non-zero
 #
-# State lives in git (compose.yml + the app's mise.toml, placed on the host by the
+# Migrations are an artifact capability, not a host toolchain: an app that has
+# them declares a one-shot `migrate` service in compose.yml (same image, migrate
+# command, `profiles: ["migrate"]` so plain `up` never starts it). The host
+# needs nothing but docker.
+#
+# State lives in git (compose.yml, placed on the host by the
 # tenant's Ansible) and in the registry (the image). "Which version is live" is the
 # running container's image, queried from `docker` (reality) — never a file we own.
 # No persistent state, no daemon, no UI, no reconciliation loop.
@@ -56,13 +61,16 @@ healthy() {
   return 1
 }
 
-# Pull → migrate (idempotent; a no-op for stateless apps) → up.
+# Pull → migrate (idempotent; runs only if compose.yml declares it) → up.
+# A migrate failure aborts before `up`, so the previous release keeps serving.
 echo "IMAGE=$IMAGE" > .env
 IMAGE="$IMAGE" docker compose pull web
-# Bare `mise migrate` (not `:migrate`): the app dir on the host holds a
-# standalone mise.toml, and monorepo path syntax requires a monorepo root.
-mise trust . >/dev/null 2>&1 || true
-mise migrate
+# `compose run` targets the service regardless of its profile; the --profile
+# flag is only needed for the existence check, since `config --services`
+# hides profiled services by default.
+if IMAGE="$IMAGE" docker compose --profile migrate config --services 2>/dev/null | grep -qx migrate; then
+  IMAGE="$IMAGE" docker compose run --rm migrate
+fi
 IMAGE="$IMAGE" docker compose up -d web
 
 if healthy; then
